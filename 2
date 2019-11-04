@@ -1,0 +1,190 @@
+<p style="background-color:#00b0f0; padding: 5px; margin: 3px auto; widows:3; orphans:3;"><span style="color:#ffffff;font-size: 24px; font-weight: bold;">配置单次任务at</span></p>
+​
+###  一、 任务描述
+​
+在任务10中，我们利用python配置了一个非常非常非常简陋，一定会被黑客发现不正常的蜜罐，可以说这样的蜜罐除了用于一些基础功能以外，并不能起到任何捕获攻击的作用
+这次，我们要配置一个具有一定功能的apache服务器并设置端口转发将代理服务器过滤后的数据转发给他，再将应答包回复给请求者。
+面向拥有一定html，php基础的人
+
+###  二、 任务目标
+​
+利用代理服务器的思路搭建简单的WAF并以此理解反向WAF
+​
+###  三、 任务环境
+​
+ubuntu16.03.4 python2.7
+​
+###  四、 任务实施
+1.1 配置代理服务器端口转发
+    def transHost(raw_host):
+        # 将raw_host解析为host和port
+        for i in range(len(raw_host)): 
+            if raw_host[i] == ":" : return raw_host[:i].strip(), int(raw_host[i+1:])
+        else : return raw_host.strip(), 8081
+    
+2.1 什么是WAF
+    Web应用防护系统（也称：网站应用级入侵防御系统 。英文：Web Application Firewall，简称： WAF）。利用国际上公认的一种说法：Web应用 防火墙 是通过执行一系列针对HTTP/HTTPS的 安全策略 来专门为Web应用提供保护的一款产品。
+
+2.2 WAF的功能
+    支持IP白名单和黑名单功能，直接将黑名单的IP访问拒绝。
+    支持URL白名单，将不需要过滤的URL进行定义。
+    支持User-Agent的过滤，匹配自定义规则中的条目，然后进行处理（返回403）。
+    支持CC攻击防护，单个URL指定时间的访问次数，超过设定值，直接返回403。
+    支持Cookie过滤，匹配自定义规则中的条目，然后进行处理（返回403）。
+    支持URL过滤，匹配自定义规则中的条目，如果用户请求的URL包含这些，返回403。
+    支持URL参数过滤，原理同上。
+    支持日志记录，将所有拒绝的操作，记录到日志中去
+
+2.3 如何实现一个简易的WAF
+    看过第九节的同学们都知道，我们利用python实现了一个虚拟代理服务器用于一个伪蜜罐,虽然仿真性极差，但是这个思路没有任何问题。
+    我们也可以利用这个思路来搭建一个WAF，他无非就是在代理的基础上添加一些过滤规则。
+    针对不同的功能过滤数据包
+
+    支持IP白名单和黑名单功能，直接将黑名单的IP访问拒绝 ----- 解析http头，解析ip，过滤ip
+    支持URL白名单，将不需要过滤的URL进行定义 ----- 解析http头，解析URL
+    支持User-Agent的过滤，匹配自定义规则中的条目，然后进行处理（返回403）----- 解析http头，解析User-Agent，过滤User-Agent
+    支持CC攻击防护，单个URL指定时间的访问次数，超过设定值，直接返回403 ----- 解析http头，解析URL，与预设值对比
+    支持Cookie过滤，匹配自定义规则中的条目，然后进行处理（返回403）----- 解析http包，解析cookie，过滤cookie
+    支持URL过滤，匹配自定义规则中的条目，如果用户请求的URL包含这些，返回403 ----- 解析http头，解析URL
+    支持URL参数过滤，原理同上 ----- 解析http头，解析URL
+    支持日志记录，将所有拒绝的操作，记录到日志中去 ----- 将被拒绝的数据包解析保存
+
+3.1 编写过滤准则
+    GET / HTTP/1.1
+    Host: 192.168.30.136
+    Connection: keep-alive
+    Cache-Control: max-age=0
+    Upgrade-Insecure-Requests: 1
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3
+    Accept-Encoding: gzip, deflate
+    Accept-Language: zh-CN,zh;q=0.9,zh-TW;q=0.8
+
+    这是访问服务器的时候的一个标准包的http包头的形式
+    我们可以利用黑名单的思路来过滤一个项
+    比如
+
+    blacklist=[]
+    cookiee=pkt.split("Host:",1)[1]
+    cookie=cookiee.split("\n",1)[0]
+    if cookie in blacklist:
+        return -1
+
+    这样的方法就可以将所有项的值都分离出来，之后再用黑名单白名单正则过滤即可。
+
+3.2 简单的web攻击
+    为了防御攻击，首先我们要了解攻击
+    web攻击从目的上来说大体上分为三类
+        拒绝服务
+            最简单的攻击,利用大量合法的请求占用网络资源使得正常的用户无法获得服务
+        获取数据
+            利用漏洞获取数据
+        获取权限
+            利用漏洞获取计算机权限
+
+    而一般的web层面的攻击主要用于前两种目的
+    攻击途径一般为注入
+        sql注入
+        xss注入
+        http头注入
+    而只要我们的进行合理的过滤，就可以防御一般的注入。
+    在后端处理不当的情况下
+    ' union ',' select ',' or ',' and ',' from ',' where ','<','>','\''
+    都可以形成注入
+    当然，能够形成注入的字符并不止这些，我们暂时只考虑这些
+
+3.3 开始过滤
+    为了方便实施，我们将左右的分离过滤操作封装为一个类
+
+    import urllib
+    import cgi
+    import MySQLdb
+    class check:
+        id=''
+        len = 0
+        # length of string
+        check_list = []
+        #The_black_list_of_check
+        token=''
+        cookie=''
+        data=''
+        database=None
+        find =0
+
+        def __init__(self,check_list):
+            self.check_list =check_list
+            self.database=None
+
+                    #When the function return -1 the request must be down
+        def input_data(self,data):
+            self.data = data
+
+        def getcookie(self,cookie):
+            self.cookie = cookie
+            mid=cookie.split('user=',1)[1]
+            self.id=mid.split(';',1)[0]
+
+        def tokencheck(self):
+            db = MySQLdb.connect("localhost", "root", "passwd", "netsec", charset='utf8')
+            cursor = db.cursor()
+            cursor.execute("SELECT * from tokenlist")
+            result = cursor.fetchall()
+            for i in result:
+                if self.token==i[1] and self.id==i[0]:
+                    return 1
+            return -1
+            
+        def check_sqli(self):
+            url = urllib.unquote(self.data)
+            url = url.replace('?',':')
+            print (url)
+            tmp=url.split('\n')
+            if(url[0]=='P' or url[0]=='G'):
+                tmp[-1]=':'+tmp[-1]
+            for testl in tmp:
+                flag=testl.split(':')
+                if len(flag)>1:
+                    test=flag[1]
+                else:
+                    continue
+                for i in self.check_list:
+                    if (test.upper().find(i.upper())!=-1):
+                        print (test)
+                        print (i)
+                        return -1
+            return 1        
+
+    再通过一个函数调用来利用
+    def checkeverything(string):
+        ref = string.split('Referer:',1)[1]
+        if 'Referer:' in string:
+            ref = ref.split('\n',1)[0]
+            if '127.0.0.1' in ref:
+                return 1
+            else:
+                return -1
+        project = check([' union ',' select ',' or ',' and ',' from ',' where ','<','>','\''])
+        project.input_data(string)
+        if(project.check_sqli()==-1):
+            return -1
+
+    这样，我们可以在主程序中简单的调用checkeverything函数就可以对数据包进行简单的过滤
+
+4.1 反向WAF
+    反向WAF是为了防止服务器成为肉鸡后向其他主机发起攻击而设立的。
+    那么为了防止服务器成为肉鸡后向其他主机发起攻击，只要我们过滤数据包，将服务器"主动"发起的请求丢掉不就大功告成了吗！
+
+    if "GET" or "POST" in pkt:
+        return -1
+
+    没错，就是这么一条简单的逻辑，我们就可以阻止服务器主动向外发包
+    当然，反向WAF是不可能配置在服务器上的！因为只要攻击者将服务器攻破，获得权限之后，就可以关掉WAF
+    所以我们应该把反向WAF配置在网关上，监听端口，过滤数据包。
+
+    然而，这样的方式只能过滤http包的内容，如果攻击者利用服务器发起无http报文的udpflood 或者synflood可就不妙了
+    这种时候就需要设置网关负载门限了，利用负载门限来限制每个端口的收发速率。
+    这也是一般的webgateway的思路
+
+
+
+
